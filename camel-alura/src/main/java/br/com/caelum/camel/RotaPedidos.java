@@ -10,12 +10,19 @@ public class RotaPedidos {
 
 			CamelContext context = new DefaultCamelContext();
 			
-			context.addRoutes(new RouteBuilder() { //cuidado, não é RoutesBuilder
+			context.addRoutes(new RouteBuilder() { 
 	
 			    @Override
 			    public void configure() throws Exception {
 			    	from("file:pedidos").
-			    	  log("${id} - ${body}").
+			    	
+			    	split().xpath("/pedido/itens/item").
+			    	filter().xpath("/item/formato[text()='IMPRESSO']").
+			    		log("${id}").
+			    		marshal().xmljson().
+			    		log("${id} - ${body}").			    	  
+			    		setHeader("CamelFileName", simple("${file:name.noext}.json")).
+			    		
 			    	to("file:saida");
 			    }
 	

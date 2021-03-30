@@ -2,6 +2,7 @@ package br.com.caelum.camel;
 
 import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
+import org.apache.camel.Processor;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.http4.HttpMethods;
 import org.apache.camel.impl.DefaultCamelContext;
@@ -16,26 +17,53 @@ public class RotaPedidos {
 	
 			    @Override
 			    public void configure() throws Exception {
-			    	from("file:pedidos").
-			    	setProperty("pedidoId", xpath("/pedido/id/text()")).
-			    	setProperty("clienteId", xpath("/pedido/pagamento/email-titular/text()")).
-			    	log("${id}").
-			    	split().xpath("/pedido/itens/item").
 			    	
-			    	setProperty("ebookId", xpath("/item/livro/codigo/text()")).
-			    	
-			    	filter().xpath("/item/formato[text()='EBOOK']").
-			    		log("${id}").
-			    		marshal().xmljson().
-			    		log("${id} - ${body}").			    	  
-			    		
-			    		//setHeader("CamelFileName", simple("${file:name.noext}.json")).
-			    		//setHeader(Exchange.FILE_NAME, simple("${file:name.noext}-${header.CamelSplitIndex}.json")).
-			    		setHeader(Exchange.HTTP_METHOD, HttpMethods.GET).
-			    		setHeader(Exchange.HTTP_QUERY, simple("ebookId=${property.ebookId}&pedidoId=${property.pedidoId}&clienteId=${property.clienteId}")).
-			    		
-			    	//to("file:saida");
-			    	to("http4://localhost:8080/webservices/ebook/item");
+			    	//Captura o erro, cria pasta e joga arquivo nao processado
+			    	errorHandler(deadLetterChannel("file:erro").
+			    			//exibe no log arquivo retirado com erro e retirado da fila
+			    			logExhausted(true).
+			    			//tenta por 3 vezes reprocessar o arquivo.. - usar em casos que uma nova tentativa possa surtir efeito (rede, dns..)
+			    			maximumRedeliveries(3).
+			    			//entre uma tentativa e outra aguarda 2 segundos
+			    			redeliveryDelay(2000).
+			    			onRedelivery(new Processor() {
+								//Imprimi no log a cada tentativa realizada
+								@Override
+								public void process(Exchange exchange) throws Exception {
+									
+									int counter = (int) exchange.getIn().getHeader(Exchange.REDELIVERY_COUNTER);
+									int max = (int) exchange.getIn().getHeader(Exchange.REDELIVERY_MAX_COUNTER);
+									System.out.println("Redelivery " + counter + "/" + max);
+									
+								}
+							}));
+			    	from("file:pedidos?delay=5s&noop=true").
+			        routeId("rota-pedidos").
+			        to("validator:pedido.xsd").
+			        //multicast().
+			            //to("direct:soap").
+			            //to("direct:http");
+
+		    	from("direct:soap").
+			        routeId("rota-soap").
+			    to("xslt:pedido-para-soap.xslt"). 
+			        log("Resultado do Template: ${body}").
+			        setHeader(Exchange.CONTENT_TYPE, constant("text/xml")).
+		        to("http4://localhost:8080/webservices/financeiro");
+
+			    from("direct:http").
+			        routeId("rota-http").
+			        setProperty("pedidoId", xpath("/pedido/id/text()")).
+			        setProperty("email", xpath("/pedido/pagamento/email-titular/text()")).
+			        split().
+			            xpath("/pedido/itens/item").
+			        filter().
+			            xpath("/item/formato[text()='EBOOK']").
+			        setProperty("ebookId", xpath("/item/livro/codigo/text()")).
+			        setHeader(Exchange.HTTP_QUERY,
+			                simple("clienteId=${property.email}&pedidoId=${property.pedidoId}&ebookId=${property.ebookId}")).
+			    to("http4://localhost:8080/webservices/ebook/item");
+			    				    				    
 			    }
 	
 		});	

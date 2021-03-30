@@ -1,10 +1,10 @@
 package br.com.caelum.camel;
 
+import org.apache.activemq.camel.component.ActiveMQComponent;
 import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.builder.RouteBuilder;
-import org.apache.camel.component.http4.HttpMethods;
 import org.apache.camel.impl.DefaultCamelContext;
 
 public class RotaPedidos {
@@ -12,16 +12,22 @@ public class RotaPedidos {
 	public static void main(String[] args) throws Exception {
 
 			CamelContext context = new DefaultCamelContext();
-			
+			//Instanciando a fila o servidor MQ que será consumido
+			context.addComponent("activemq", ActiveMQComponent.activeMQComponent("tcp://localhost:61616/"));
 			context.addRoutes(new RouteBuilder() { 
 	
 			    @Override
 			    public void configure() throws Exception {
 			    	
 			    	//Captura o erro, cria pasta e joga arquivo nao processado
-			    	errorHandler(deadLetterChannel("file:erro").
+			    	//errorHandler(deadLetterChannel("file:erro").
+			    	
+			    	//Captura o erro, joga arquivo nao processado na fila pedidos.DLQ (criada pela interface http://localhost:8161/admin/queues.jsp)
+			    	errorHandler(deadLetterChannel("activemq:queue:pedidos.DLQ").
+			    			
+			    			
 			    			//exibe no log arquivo retirado com erro e retirado da fila
-			    			logExhausted(true).
+			    			logExhaustedMessageHistory(true).
 			    			//tenta por 3 vezes reprocessar o arquivo.. - usar em casos que uma nova tentativa possa surtir efeito (rede, dns..)
 			    			maximumRedeliveries(3).
 			    			//entre uma tentativa e outra aguarda 2 segundos
@@ -37,8 +43,11 @@ public class RotaPedidos {
 									
 								}
 							}));
-			    	from("file:pedidos?delay=5s&noop=true").
-			        routeId("rota-pedidos").
+			    	
+			    	//Consome arquivo XML da pasta pedidos a cada 5 segundos sem exclusao
+			    	//from("file:pedidos?delay=5s&noop=true").
+			    	from("activemq:queue:pedidos").
+			    	routeId("rota-pedidos").
 			        to("validator:pedido.xsd").
 			        //multicast().
 			            //to("direct:soap").
